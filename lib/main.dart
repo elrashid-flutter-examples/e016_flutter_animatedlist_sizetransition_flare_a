@@ -1,111 +1,416 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:flare_flutter/flare_actor.dart';
 
-void main() => runApp(MyApp());
+void main() {
+  runApp(MyApp());
+}
 
 class MyApp extends StatelessWidget {
-  // This widget is the root of your application.
-  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
+    var materialApp = MaterialApp(
+      title: 'MY APP',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // Try running your application with "flutter run". You'll see the
-        // application has a blue toolbar. Then, without quitting the app, try
-        // changing the primarySwatch below to Colors.green and then invoke
-        // "hot reload" (press "r" in the console where you ran "flutter run",
-        // or simply save your changes to "hot reload" in a Flutter IDE).
-        // Notice that the counter didn't reset back to zero; the application
-        // is not restarted.
         primarySwatch: Colors.blue,
       ),
-      home: MyHomePage(title: 'Flutter Demo Home Page'),
+      home: TasksPageWidget(),
     );
+    return materialApp;
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  MyHomePage({Key key, this.title}) : super(key: key);
+class Tasks {
+  static String apiEndpoint = "http://10.0.2.2:5011/api/Task/";
 
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
+  static Future<List<TaskOpj>> allTasks() async {
+    var response =
+        await http.get(apiEndpoint, headers: await _getDefaultHeader());
 
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
+    if (response.statusCode == 200) {
+      final responseJson = json.decode(response.body);
+      var list = new List<TaskOpj>();
+      responseJson
+          .forEach((element) => list.add(new TaskOpj.fromJson(element)));
+      return list;
+    } else {
+      throw Exception('Failed to get Tasks');
+    }
+  }
 
-  final String title;
+  static Future<TaskOpj> getTask(String id) async {
+    var response =
+        await http.get(apiEndpoint + id, headers: await _getDefaultHeader());
+    if (response.statusCode == 200) {
+      final responseJson = json.decode(response.body);
+      var opj = TaskOpj.fromJson(responseJson);
+      return opj;
+    } else {
+      throw Exception('Failed to get Task with id = $id');
+    }
+  }
+
+  static Future<TaskOpj> createTask(TaskOpj opj) async {
+    var body = json.encode(opj);
+    var response = await http.post(apiEndpoint,
+        body: body, headers: await _getDefaultHeader());
+    if (response.statusCode == 201) {
+      final responseJson = json.decode(response.body);
+      var opj = TaskOpj.fromJson(responseJson);
+      return opj;
+    } else {
+      throw Exception('Failed to create Task \n $body');
+    }
+  }
+
+  static Future<bool> updateTask(TaskOpj opj) async {
+    var body = json.encode(opj);
+    var response = await http.put(apiEndpoint + opj.guid,
+        body: body, headers: await _getDefaultHeader());
+    if (response.statusCode == 204) {
+      return true;
+    } else {
+      throw Exception('Failed to update Task \n $body');
+    }
+  }
+
+  static Future deleteTask(String id) async {
+    var response =
+        await http.delete(apiEndpoint + id, headers: await _getDefaultHeader());
+    if (response.statusCode == 204) {
+      return;
+    } else {
+      throw Exception('Failed to delete Task with id = $id');
+    }
+  }
+
+  static Future<Map<String, String>> _getDefaultHeader(
+      [Map<String, String> curentHeaders]) async {
+    var headers = Map<String, String>();
+
+    var jsonHeader = "application/json";
+    headers['content-type'] = jsonHeader;
+    if (curentHeaders != null) {
+      curentHeaders.forEach((key, value) {
+        headers[key] = value;
+      });
+    }
+
+    return headers;
+  }
+}
+
+class TaskOpj {
+  String guid;
+  String note;
+  String createdAt;
+  String modfiledAt;
+
+  TaskOpj({this.guid, this.note, this.createdAt, this.modfiledAt});
+
+  TaskOpj.fromJson(Map<String, dynamic> json) {
+    guid = json['guid'];
+    note = json['note'];
+    createdAt = json['createdAt'];
+    modfiledAt = json['modfiledAt'];
+  }
+
+  Map<String, dynamic> toJson() {
+    final Map<String, dynamic> data = new Map<String, dynamic>();
+    data['guid'] = this.guid;
+    data['note'] = this.note;
+    data['createdAt'] = this.createdAt;
+    data['modfiledAt'] = this.modfiledAt;
+    return data;
+  }
+}
+
+class TasksPageWidget extends StatefulWidget {
+  @override
+  _TasksPageWidgetState createState() => _TasksPageWidgetState();
+}
+
+class _TasksPageWidgetState extends State<TasksPageWidget> {
+  final _myListKey = GlobalKey<AnimatedListState>();
 
   @override
-  _MyHomePageState createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  void initState() {
+    super.initState();
+    refresh();
   }
+
+  Future refresh() async {
+    var newTasks = await Tasks.allTasks();
+
+    // Delete
+
+    var newTasksGuids = newTasks.map((m) => m.guid);
+
+    var taskstoRemove =
+        tasks.where((old) => !newTasksGuids.contains(old.guid)).toList();
+
+    for (var i = 0; i < taskstoRemove.length; i++) {
+      var ti = tasks.indexOf(taskstoRemove[i]);
+      tasks.removeAt(ti);
+      _myListKey.currentState.removeItem(
+          ti,
+          (BuildContext context, Animation<double> animation) => SizedBox(
+                height: 80,
+                child: FlareActor("assets/Penguin.flr",
+                    alignment: Alignment.center,
+                    fit: BoxFit.contain,
+                    animation: "walk"),
+              ),
+          duration: Duration(seconds: 3));
+    }
+
+    // insert and update
+    for (var i = 0; i < newTasks.length; i++) {
+      var t = tasks.singleWhere((w) => w.guid == newTasks[i].guid,
+          orElse: () => null);
+      if (t == null) {
+        tasks.insert(0, newTasks[i]);
+        _myListKey.currentState.insertItem(0);
+      } else {
+        if (t.modfiledAt != newTasks[i].modfiledAt) {
+          var ti = tasks.indexOf(t);
+          tasks[ti] = newTasks[i];
+        }
+      }
+    }
+  }
+
+  var tasks = List<TaskOpj>();
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: Text("Tasks"),
+        actions: <Widget>[
+          IconButton(
+            icon: Icon(Icons.refresh),
+            onPressed: () => refresh(),
+          ),
+        ],
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Invoke "debug painting" (press "p" in the console, choose the
-          // "Toggle Debug Paint" action from the Flutter Inspector in Android
-          // Studio, or the "Toggle Debug Paint" command in Visual Studio Code)
-          // to see the wireframe for each widget.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Text(
-              'You have pushed the button this many times:',
-            ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.display1,
-            ),
-          ],
+      body: AnimatedList(
+        key: _myListKey,
+        initialItemCount: tasks.length,
+        itemBuilder: (context, index, Animation<double> animation) =>
+            SizeTransition(
+          axis: Axis.vertical,
+          sizeFactor: animation,
+          child: TaskWidget(
+            taskOpj: tasks[index],
+            notifyParent: refresh,
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) {
+              return TaskAddPageWidget(
+                notifyParent: refresh,
+              );
+            },
+          ),
+        ),
+        tooltip: 'add',
         child: Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
+      ),
     );
+  }
+}
+
+class TaskWidget extends StatelessWidget {
+  final TaskOpj taskOpj;
+  final Function() notifyParent;
+  TaskWidget({Key key, @required this.taskOpj, @required this.notifyParent})
+      : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(
+        top: 0.0,
+        bottom: 0.0,
+      ),
+      child: new Card(
+        child: ListTile(
+          leading: IconButton(
+            icon: Icon(Icons.edit),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) {
+                  return TaskEditPageWidget(
+                    taskOpj: taskOpj,
+                    notifyParent: notifyParent,
+                  );
+                },
+              ),
+            ),
+          ),
+          title: Text(taskOpj.note),
+          subtitle: Text(taskOpj.guid),
+          trailing: new IconButton(
+            icon: Icon(Icons.delete),
+            onPressed: () async {
+              await Tasks.deleteTask(taskOpj.guid);
+              Scaffold.of(context).hideCurrentSnackBar();
+              Scaffold.of(context).showSnackBar(new SnackBar(
+                content: new Text("Deleted note : " + taskOpj.guid),
+              ));
+              if (notifyParent != null) notifyParent();
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class TaskEditPageWidget extends StatefulWidget {
+  final Function() notifyParent;
+  final TaskOpj taskOpj;
+  TaskEditPageWidget(
+      {Key key, @required this.taskOpj, @required this.notifyParent})
+      : super(key: key);
+
+  @override
+  _TaskEditPageWidgetState createState() => _TaskEditPageWidgetState();
+}
+
+class _TaskEditPageWidgetState extends State<TaskEditPageWidget> {
+  TextEditingController _noteController;
+
+  @override
+  void initState() {
+    super.initState();
+    _noteController = TextEditingController.fromValue(
+      TextEditingValue(
+        text: widget.taskOpj.note,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _noteController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: _appBar(),
+      body: _body(),
+    );
+  }
+
+  Widget _appBar() {
+    return AppBar(
+      title: new Text("Edit Task"),
+      actions: <Widget>[
+        new IconButton(
+          icon: new Icon(Icons.save),
+          onPressed: _save,
+        ),
+      ],
+    );
+  }
+
+  Widget _body() {
+    return SingleChildScrollView(
+      child: Column(
+        children: <Widget>[
+          Text("Note:"),
+          TextField(
+              decoration: InputDecoration(border: InputBorder.none),
+              autofocus: true,
+              keyboardType: TextInputType.multiline,
+              maxLines: null,
+              controller: _noteController),
+        ],
+      ),
+    );
+  }
+
+  Future _save() async {
+    widget.taskOpj.note = _noteController.text;
+    await Tasks.updateTask(widget.taskOpj);
+    widget.notifyParent();
+    Navigator.pop(context);
+  }
+}
+
+class TaskAddPageWidget extends StatefulWidget {
+  final Function() notifyParent;
+  TaskAddPageWidget({Key key, @required this.notifyParent}) : super(key: key);
+  @override
+  _TaskAddPageWidgetState createState() => _TaskAddPageWidgetState();
+}
+
+class _TaskAddPageWidgetState extends State<TaskAddPageWidget> {
+  TextEditingController _noteController;
+
+  @override
+  void initState() {
+    super.initState();
+    _noteController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _noteController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: _appBar(),
+      body: _body(),
+    );
+  }
+
+  Widget _appBar() {
+    return AppBar(
+      title: new Text("Add Task"),
+      actions: <Widget>[
+        new IconButton(
+          icon: new Icon(Icons.save),
+          onPressed: _save,
+        ),
+      ],
+    );
+  }
+
+  Widget _body() {
+    return SingleChildScrollView(
+      child: Column(
+        children: <Widget>[
+          Text("Note:"),
+          TextField(
+              decoration: InputDecoration(border: InputBorder.none),
+              autofocus: true,
+              keyboardType: TextInputType.multiline,
+              maxLines: null,
+              controller: _noteController),
+        ],
+      ),
+    );
+  }
+
+  Future _save() async {
+    var taskOpj = TaskOpj();
+    taskOpj.note = _noteController.text;
+    await Tasks.createTask(taskOpj);
+    widget.notifyParent();
+    Navigator.pop(context);
   }
 }
